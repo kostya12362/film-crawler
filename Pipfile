@@ -1,0 +1,22 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+fastapi = "==0.111.0"
+uvicorn = "*"
+pydantic-settings = "==2.2.1"
+sqlalchemy = "==2.0.29"
+aiosqlite = "*"
+alembic = "==1.13.1"
+aio-scrapy = {extras = ["httpx", "aio-pika", "mongo"] }
+aiofiles = "*"
+passlib = {extras = ["bcrypt"], version = "*"}
+fastapi-async-sqlalchemy = "*"
+greenlet = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.11"
