@@ -1,19 +1,15 @@
-import asyncio
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker, async_scoped_session
-
-from ..settings import config
-
-
-class Database:
-    def __init__(self, db_url: str):
-        self.engine = create_async_engine(db_url, echo=True)
-        self.SessionFactory = async_scoped_session(
-            async_sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False),
-            scopefunc=asyncio.current_task
-        )
-
-    async def get_session(self):
-        return self.SessionFactory()
+from fastapi_async_sqlalchemy import db
+from sqlalchemy.sql import update
+from .base import Base
+from ..models import Spider, SpiderStatus
 
 
-db = Database(config.get_db_uri)
+async def create_tables():
+    async with db():
+        engine = db.session.bind
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        stmt = update(Spider).values(status=SpiderStatus.FINISHED).execution_options(synchronize_session="fetch")
+        await db.session.execute(stmt)
+        await db.session.commit()
+    # await db.commit()

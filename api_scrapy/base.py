@@ -1,58 +1,69 @@
-import os
-import importlib
-from typing import Type
-from uuid import uuid4, UUID
-from collections import OrderedDict
+import json
+import asyncio
 
-from aioscrapy import Spider
+from uuid import uuid4, UUID
+
 from aioscrapy.crawler import CrawlerProcess, Crawler
 from aioscrapy.utils.project import get_project_settings
 
+from .utils.tools import load_all_spiders, get_log_file_path, structure_stats
 from .exceptions import SpiderNotFound, InstanceNotFound
-from .settings import config
+from .models import Spider, SpiderStatus
 
 
 class ScraperManager:
     def __init__(self):
         self.settings = get_project_settings()
         self.instance: dict[UUID, Crawler] = {}
-        self.spiders = self._load_all_spiders()
-        self.log_dir: str = config.log_dir
+        self.spiders = load_all_spiders()
+        self.db_lock = asyncio.Lock()
 
-    @staticmethod
-    def _load_all_spiders() -> dict[str, Type[Spider] | Crawler | str]:
-        spiders = dict()
-        for root, _, files in os.walk(config.BASE_DIR):
-            for file in files:
-                if file.endswith('.py') and not file.startswith('__'):
-                    module_path = str(os.path.join(root, file))
-                    module_name = os.path.relpath(module_path, config.BASE_DIR).replace(os.path.sep, '.')[:-3]
-                    if 'api_scrapy' in module_name:
-                        continue
-                    try:
-                        module = importlib.import_module(module_name)
-                        for attr in dir(module):
-                            obj = getattr(module, attr)
-                            if isinstance(obj, type) and issubclass(obj, Spider) and obj.__module__ == module.__name__:
-                                spiders[obj.name] = obj
-                    except ImportError:
-                        continue
-        return spiders
-
-    async def start_scraper(self, spider_name: str):
+    async def start_scraper(
+            self,
+            spider_name: str,
+            instance_count: int = 1,
+            project: str = None
+    ):
         spider_class = self.spiders.get(spider_name)
         if not spider_class:
             raise SpiderNotFound()
-        instance_id = uuid4()
-        settings = dict(self.settings)
-        settings |= dict(spider_class.custom_settings)
-        settings['LOG_FILE'] = self._get_log_file_path(spider_name, instance_id)
-        process = CrawlerProcess(settings)
-        crawler = process.create_crawler(spider_class, settings)
-        process.crawl_soon(crawler)
-        self.instance[instance_id] = crawler
+        result = []
+        for _ in range(instance_count):
+            instance_id = uuid4()
+            settings = dict(self.settings)
+            settings |= dict(spider_class.custom_settings)
+            settings['LOG_FILE'] = get_log_file_path(spider_name, instance_id)
+            process = CrawlerProcess(settings)
+            crawler: Crawler = process.create_crawler(spider_class, settings)
+            process.crawl_soon(crawler)
+            self.instance[instance_id] = crawler
+            # async with self.db_lock:
+            await Spider.create(
+                id=instance_id,
+                name=spider_name,
+                spider=json.dumps(self.get_scraper(instance_id, crawler)),
+                project=project,
+            )
+            asyncio.create_task(self._periodic_update_stats(instance_id, crawler))  # noqa
+            result.append({"id": instance_id})
+        return result
 
-        return {"status": "started", "id": instance_id}
+    async def _periodic_update_stats(self, instance_id, crawler: Crawler, interval=5):
+        while instance_id in self.instance and crawler.engine.running:
+            # async with self.db_lock:
+            await Spider.update(
+                id=instance_id,
+                spider=self.get_scraper(instance_id, crawler),
+                status=SpiderStatus.RUNNING
+            )
+            await asyncio.sleep(interval)
+
+            # async with self.db_lock:
+            await Spider.update(
+                id=instance_id,
+                spider=self.get_scraper(instance_id, crawler),
+                status=SpiderStatus.FINISHED
+            )
 
     async def stop_scraper(self, instance_id: UUID):
         if instance_id not in self.instance:
@@ -60,51 +71,63 @@ class ScraperManager:
 
         crawler = self.instance[instance_id]
         await crawler.stop()
-        # del self.instance[instance_id]
+        del self.instance[instance_id]
         return {"status": "stopped", "id": instance_id}
 
-    def get_active_scrapers(self):
-        return [self.get_scraper(i) for i in list(self.instance.keys())]
+    async def get_active_scrapers(self):
+        scrapers = []
+        for instance in await Spider.objects.all().order_by('created_at'):
+            if instance.id in self.instance:
+                crawler = self.instance[instance.id]
+                scrapers.append(self.get_scraper(instance.id, crawler, instance.project))
+            else:
+                scrapers.append(instance.spider)
+        return scrapers
 
-    def _get_stats(self, instance_id: UUID) -> dict:
-        if instance_id not in self.instance:
-            return {"error": "Instance not found"}
-        crawler = self.instance[instance_id]
-        stats = crawler.stats.get_stats()
-        stats = OrderedDict((k, v) for k, v in sorted(stats.items()))
-        stats = self._structure_stats(stats)
-        return stats
+    @classmethod
+    async def get_projects(cls):
+        spiders = await Spider.objects.all()
+        projects_dict = {}
+        base_instance = {i: [] for i in map(lambda x: x.value.lower(), SpiderStatus)}
+        for spider in spiders:
+            project_name = spider.project if spider.project else "default"
+            if project_name not in projects_dict:
+                projects_dict[project_name] = {"spiders": {}}
+
+            if spider.name not in projects_dict[project_name]["spiders"]:
+                projects_dict[project_name]["spiders"][spider.name] = base_instance.copy()
+
+            projects_dict[project_name]["spiders"][spider.name][spider.status.value.lower()].append(spider.spider)
+
+        projects_list = []
+        for project, data in projects_dict.items():
+            item = {"project": project, "spiders": []}
+            for spider, status in data["spiders"].items():
+                item["spiders"].append({"spider_name": spider, "status": status})
+            projects_list.append(item)
+        return projects_list
 
     @staticmethod
-    def _structure_stats(stats: dict) -> dict[str, dict]:
-        structured_stats = {}
-        for key, value in stats.items():
-            parts = key.split('/')
-            d = structured_stats
-            for part in parts[:-1]:
-                if part not in d:
-                    d[part] = {}
-                d = d[part]
-            d[parts[-1]] = value
-        return structured_stats
+    def _get_stats(crawler: Crawler) -> dict:
+        stats = crawler.stats.get_stats()
+        stats = structure_stats(stats)
+        return stats
 
-    def _get_log_file_path(self, spider_name: str, instance_id: UUID) -> str:
-        log_dir = os.path.join(self.log_dir, spider_name)
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-        filename = f"{str(instance_id)}.log"
-        return os.path.join(log_dir, filename)
-
-    def get_scraper(self, instance_id: UUID) -> dict:
-        if instance_id not in self.instance:
-            raise InstanceNotFound
-        crawler: Crawler = self.instance.get(instance_id)
+    def get_scraper(
+            self,
+            instance_id: UUID,
+            crawler: Crawler,
+            project: str = None
+    ) -> dict:
         if crawler.spider is None:
-            return {"id": instance_id, "status": "pending"}
+            return {
+                "id": str(instance_id),
+            }
         data = {
-            "id": instance_id,
+            "id": str(instance_id),
+            "project": project,
             "spider_name": crawler.spider.name,
-            "stats": self._get_stats(instance_id),
+            "stats": self._get_stats(crawler),
             "log": {
                 "level": crawler.spider.settings.get('LOG_LEVEL'),
                 "file": crawler.spider.settings.get('LOG_FILE'),

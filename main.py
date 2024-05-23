@@ -2,7 +2,7 @@ from api_scrapy.api import ScrapyAPI
 
 app = ScrapyAPI(
     title='JustwatchCrawler',
-    secret_key='test',
+    # secret_key='test',
     version='0.1',
 )
 

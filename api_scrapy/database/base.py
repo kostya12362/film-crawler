@@ -2,7 +2,7 @@ from typing import (
     Type,
     Any,
 )
-from sqlalchemy import BinaryExpression, MetaData, select, Select, and_
+from sqlalchemy import MetaData
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.ext.asyncio import AsyncAttrs
 
@@ -46,28 +46,6 @@ class Model(AsyncAttrs, Base):
         return getattr(self, 'id', None) or getattr(self, 'pk', None)
 
     @classmethod
-    def make_query(cls: Type[MODEL], **kwargs: Any) -> 'Select':
-        """
-        Создает SQL-запрос для модели на основе переданных фильтров.
-        :param kwargs: Ключевые аргументы, которые используются для фильтрации результатов.
-        :return: Объект Select, который представляет SQL-запрос.
-        """
-        query = select(cls)
-        # Генерация фильтров на основе kwargs
-        if kwargs:
-            conditions = [cls._kwargs_to_binary_expression(**kwargs)]
-            query = query.where(*conditions)
-        return query
-
-    @classmethod
-    def _kwargs_to_binary_expression(cls: Type[MODEL], **kwargs: Any) -> BinaryExpression | None:
-        expressions = [getattr(cls, key) == value for key, value in kwargs.items() if key in cls.__table__.columns]
-        if expressions:
-            return and_(*expressions)
-        else:
-            return None
-
-    @classmethod
     async def get_or_none(cls: Type[MODEL], **kwargs: Any) -> MODEL | None:
         obj = await cls.objects.get(**kwargs)
         if obj is None:
@@ -77,32 +55,21 @@ class Model(AsyncAttrs, Base):
     @classmethod
     async def create(cls: Type[MODEL], **kwargs) -> 'MODEL':
         instance = cls(**kwargs)
-        db.session.add(instance)
-        await db.session.commit()
-        await db.session.refresh(instance)
+        async with db():  # Здесь происходит создание контекстного менеджера сессии
+            db.session.add(instance)
+            await db.session.commit()
+            await db.session.refresh(instance)
         return instance
 
     @classmethod
     async def get_or_create(cls, defaults=None, **kwargs) -> tuple['MODEL', bool]:
-        """
-        Get an object based on specified criteria or create a new one with specified attributes.
-        :param defaults: A dictionary of values to initialize the object when it is created.
-        :param kwargs: Object search criteria.
-        :return: A tuple containing an object and a flag indicating whether the object was created (True) or
-        found (False).
-        """
-        # Checking the presence of an object in the database
         instance = await cls.get_or_none(**kwargs)
         created = False
         if instance is None:
-            # Object not found, create a new one
             if defaults:
                 kwargs.update(defaults)
-            print(kwargs)
             instance = await cls.create(**kwargs)
-            # db.session.add(instance)
             created = True
-            # await db.session.commit()
         return instance, created
 
     @classmethod
@@ -111,15 +78,28 @@ class Model(AsyncAttrs, Base):
             defaults = {}
         instance = await cls.get_or_none(**kwargs)
         status = False
-        if instance:
-            for key, value in defaults.items():
-                setattr(instance, key, value)
-            db.session.add(instance)
-        else:
-            params = {**kwargs, **defaults}
-            instance = cls(**params)
-            db.session.add(instance)
-            status = True
-        await db.session.commit()
-        await db.session.refresh(instance)
+        async with db():  # Здесь происходит создание контекстного менеджера сессии
+            if instance:
+                for key, value in defaults.items():
+                    setattr(instance, key, value)
+                db.session.add(instance)
+            else:
+                params = {**kwargs, **defaults}
+                instance = cls(**params)
+                db.session.add(instance)
+                status = True
+            await db.session.commit()
+            await db.session.refresh(instance)
         return instance, status
+
+    @classmethod
+    async def update(cls, id: Any, **kwargs) -> 'MODEL':
+        async with db():  # Здесь происходит создание контекстного менеджера сессии
+            instance = await db.session.get(cls, id)
+            if instance:
+                for key, value in kwargs.items():
+                    setattr(instance, key, value)
+                db.session.add(instance)
+                await db.session.commit()
+                await db.session.refresh(instance)
+        return instance

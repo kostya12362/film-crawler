@@ -1,27 +1,26 @@
-import random
-import string
 import uuid
+import enum
 
-from sqlalchemy import orm, Index, UniqueConstraint
+from sqlalchemy import orm, PickleType, Enum, select
 
 from .database import Model, DateTimeMixin
+from fastapi_async_sqlalchemy import db
 
 
-def generate_key(length: int = 32) -> str:
-    return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
+class SpiderStatus(enum.Enum):  # noqa
+    PENDING = 'PENDING'
+    RUNNING = 'RUNNING'
+    FINISHED = 'FINISHED'
 
 
-class Token(Model, DateTimeMixin):
-    __tablename__ = 'tokens'
-    id: orm.Mapped[uuid.UUID] = orm.mapped_column(primary_key=True, autoincrement=True)
+class Spider(Model, DateTimeMixin):
+    __tablename__ = 'spiders'
+    id: orm.Mapped[uuid.UUID] = orm.mapped_column(primary_key=True, default=uuid.uuid4)
     name: orm.Mapped[str] = orm.mapped_column(nullable=False)
-    token: orm.Mapped[str] = orm.mapped_column(nullable=False, default=generate_key)
-    is_active: orm.Mapped[bool] = orm.mapped_column(nullable=False, default=True)
-
-    __table_args__ = (
-        Index("idx_name_and_id", id, name, unique=True),
-        UniqueConstraint(id, name, name='idx_name_and_id'),
+    status: orm.Mapped[str] = orm.mapped_column(
+        Enum(SpiderStatus),
+        nullable=False,
+        default=SpiderStatus.PENDING,
     )
-
-    def __str__(self):
-        return self.name
+    project: orm.Mapped[str] = orm.mapped_column(default="default")
+    spider: orm.Mapped[object] = orm.mapped_column(PickleType, nullable=False)
