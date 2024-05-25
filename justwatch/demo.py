@@ -7,7 +7,8 @@ from aioscrapy import Spider, Request
 class JustwatchSpider(Spider):
     name = 'cmc1'
     custom_settings = dict(
-        USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+        USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 "
+                   "Safari/537.36",
         DOWNLOAD_DELAY=0.5,
         RANDOMIZE_DOWNLOAD_DELAY=True,
         CONCURRENT_REQUESTS=12,
@@ -62,7 +63,8 @@ class JustwatchSpider(Spider):
     async def get_item(self, response: Response):
         item = dict()
         item |= {'__csv__': {
-            'filename': '/Users/ostapenkokostya/work/movies/app/test.csv',
+            # 'filename': '/Users/ostapenkokostya/work/movies/app/test.csv',
+            'filename': './test.csv',
         }}
         yield item
         # contracts = list()
