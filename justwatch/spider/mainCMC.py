@@ -8,7 +8,7 @@ class JustwatchSpider(Spider):
     name = 'cmc'
     custom_settings = dict(
         USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                   " (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
+                   "(KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
         DOWNLOAD_DELAY=3,
         RANDOMIZE_DOWNLOAD_DELAY=True,
         CONCURRENT_REQUESTS=1,
@@ -46,8 +46,12 @@ class JustwatchSpider(Spider):
 
         for item in data:
             item |= {'__csv__': {
-                'filename': '/Users/ostapenkokostya/work/movies/app/test.csv',
+                'filename': './test.csv',
             }}
             yield item
         await asyncio.sleep(50)
 
+
+# For test
+if __name__ == "__main__":
+    JustwatchSpider.start()

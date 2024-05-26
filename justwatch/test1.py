@@ -6,19 +6,24 @@ from aioscrapy.http import Response
 from aioscrapy import Spider, Request
 
 from aioscrapy.utils.project import get_project_settings
-from datetime import datetime
 import pymongo
 import logging
 import json
 import base64
 # from pprint import pprint
 
+from justwatch.resources.justwatch_graphql import (
+    QUERY_GET_ALL_PACKAGES,
+    QUERY_SEARCH_PAGES,
+)
+from justwatch.parser.justwatch.justwatch_parser_v3 import ParserJustwatch
+
 logger = logging.getLogger(__name__)
 settings = get_project_settings()
 
 
-class JustWatchSpider(Spider):
-    name = 'justwatch_test'
+class JustwatchSpider(Spider):
+    name = 'justwatch_v3'
 
     # Control url and domains
     allow_domains = ['apis.justwatch.com']
@@ -60,26 +65,20 @@ class JustWatchSpider(Spider):
         'accept': '*/*',
         'content-type': 'application/json',
         'origin': 'https://www.justwatch.com',
-
-        # 'authority': 'api.coinmarketcap.com',
-        # 'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/'
-        #           'webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-
     }
 
     #  !
-    #  start_urls = [
+    # start_urls = [
     #     # 'https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listing?start=1&limit=10000&'
     #     # 'sortBy=market_cap&sortType=desc&convert=USD&cryptoType=all&tagType=all&audited=false&'
     #     # 'aux=ath,atl,high24h,low24h,num_market_pairs,cmc_rank,date_added,'
     #     # 'max_supply,circulating_supply,total_supply,volume_7d,volume_30d,volume_60d,tags'
-    # ]
-    #
+    #  ]
 
     handle_httpstatus_list = [400, 415, 422, 429, 502]
 
     def __init__(self, *args, **kwargs):
-        super(JustWatchSpider, self).__init__(*args, **kwargs)
+        super(JustwatchSpider, self).__init__(*args, **kwargs)
         skip = int(kwargs.get('skip', 0))
         limit = int(kwargs.get('limit', 1))
         logger.info(f'skip = {skip} limit = {limit}--------------------------------')
@@ -202,13 +201,13 @@ class JustWatchSpider(Spider):
                     dont_filter=True,
                 )
 
-    def get_packages_request(self, response: Response, packages: dict = None):
+    async def get_packages_request(self, response: Response, packages: dict = None):
         localization = response.meta['localization']
         if response.meta.get('_localization') is not None:
             _localization = response.meta['_localization']
         else:
             _localization = localization
-        return aioscrapy.Request(
+        yield aioscrapy.Request(  # Maybe need to use await
             url=self.base_url,
             method='POST',
             body=json.dumps({
@@ -232,110 +231,180 @@ class JustWatchSpider(Spider):
             dont_filter=True,
         )
 
+        async def get_item_in_usa(self, response):
+            data = self.find_data(response)
+            if isinstance(data[0], dict):
+                variables = json.loads(response.request.body.decode('utf-8'))['variables']
+                data = ParserJustwatch(
+                    data=data[0],
+                    by_fild=data[1],
+                    country=variables['country'],
+                    language=variables['language'],
+                    response=response,
+                )
+                item = data.get_data
+                if data.get_full_path and '/us/' in data.get_full_path:
+                    # Request extract all localization by full path
+                    yield aioscrapy.Request(
+                        url=f"https://apis.justwatch.com/content/urls?path={data.get_full_path}",
+                        headers=self.headers,
+                        callback=self.get_all_localization,
+                        meta={
+                            'packages': response.meta['packages'],
+                            'justwatch_id': item['justwatch_id'],
+                            'item': response.meta['item'],
+                        }
+                    )
+                yield item
+                # else:
+                #   logger.info(f"Not found item in get_item_in_usa {response.meta['item']['id']}")
 
-        # !!!!!!!!!!!
+        async def get_all_localization(self, response):
+            data = json.loads(response.text)['href_lang_tags']
+            countries = [{
+                "country": i['locale'].split('_')[1],
+                "language": i['locale'].split('_')[0]
+            } for i in data if i['locale'] != 'en_US']
+            if len(countries) > 0:
+                yield aioscrapy.Request(
+                    url=self.base_url,
+                    method='POST',
+                    body=json.dumps({
+                        "query": self.create_query(countries),
+                        "variables": self.get_variables(countries, response.meta['justwatch_id'])
+                    }),
+                    headers=self.headers,
+                    callback=self.get_other_localization,
+                    cookies={},
+                    meta={
+                        'packages': response.meta['packages'],
+                        "item": response.meta['item']
+                    },
+                    dont_filter=True,
+                )
 
+        async def get_other_localization(self, response):
+            data = self.find_data(response)
 
-        # async def get_item_in_usa(self, response):
-        #     data = self.find_data(response)
-        #     if isinstance(data[0], dict):
-        #         variables = json.loads(response.request.body.decode('utf-8'))['variables']
-        #         data = ParserJustwatch(
-        #             data=data[0],
-        #             by_fild=data[1],
-        #             country=variables['country'],
-        #             language=variables['language'],
-        #             response=response,
-        #         )
-        #         item = data.get_data
-        #         if data.get_full_path and '/us/' in data.get_full_path:
-        #             # Request extract all localization by full path
-        #             yield aioscrapy.Request(
-        #                 url=f"https://apis.justwatch.com/content/urls?path={data.get_full_path}",
-        #                 headers=self.headers,
-        #                 callback=self.get_all_localization,
-        #                 meta={
-        #                     'packages': response.meta['packages'],
-        #                     'justwatch_id': item['justwatch_id'],
-        #                     'item': response.meta['item'],
-        #                 }
-        #             )
-        #         yield item
+            if isinstance(data[0], tuple):
+                variables = json.loads(response.request.body.decode('utf-8'))['variables']
+                for i in data[0]:
+                    item = ParserJustwatch(data=i[1], by_fild=data[1], country=variables[f'country{i[0]}'],
+                                           language=variables[f'language{i[0]}'], response=response)
 
-        # def get_all_localization(self, response):
-        #     data = json.loads(response.text)['href_lang_tags']
-        #     countries = [{
-        #         "country": i['locale'].split('_')[1],
-        #         "language": i['locale'].split('_')[0]
-        #     } for i in data if i['locale'] != 'en_US']
-        #     if len(countries) > 0:
-        #         yield scrapy.Request(
-        #             url=self.base_url,
-        #             method='POST',
-        #             body=json.dumps({
-        #                 "query": self.create_query(countries),
-        #                 "variables": self.get_variables(countries, response.meta['justwatch_id'])
-        #             }),
-        #             headers=self.headers,
-        #             callback=self.get_other_localization,
-        #             cookies={},
-        #             meta={
-        #                 'packages': response.meta['packages'],
-        #                 "item": response.meta['item']
-        #             },
-        #             dont_filter=True,
-        #         )
+                    yield item.get_data
+            else:
+                logging.error("Error in get_other_localization")
+
         #
-        # def get_other_localization(self, response):
-        #     data = self.find_data(response)
+        # for item in data:
+        #     # item |= {'__csv__': {
+        #     #     'filename': '/Users/ostapenkokostya/work/movies/app/test.csv',
+        #     #     'filename': './test.csv',
+        #     # }}
+        #     yield Request(
+        #         url=f"https://api.coinmarketcap.com/data-api/v3/cryptocurrency/detail?id={item['id']}",
+        #         headers=self.headers,
+        #         callback=self.get_item,
+        #         meta={'meta': item}
+        #     )
         #
-        #     if isinstance(data[0], tuple):
-        #         variables = json.loads(response.request.body.decode('utf-8'))['variables']
-        #         for i in data[0]:
-        #             item = ParserJustwatch(data=i[1], by_fild=data[1], country=variables[f'country{i[0]}'],
-        #                                    language=variables[f'language{i[0]}'], response=response)
-        #
-        #             yield item.get_data
-        #     else:
-        #         logging.error("Error in get_other_localization")
+
+    # From demoCMC.py (test ver w/CMC)
+    # async def get_item(self, response: Response):
+    #     item = dict()
+    #     item |= {'__csv__': {
+    #         # 'filename': '/Users/ostapenkokostya/work/movies/app/test.csv',
+    #         'filename': './test.csv',
+    #     }}
+    #     yield item
+    #     # contracts = list()
+    #     # # EXTRACT new cryptocurrency
+    #     # data = json.loads(response.text)['data']
+    #     # for fields in self.parser.FIELDS:
+    #     #     item[fields] = getattr(self.parser(data=data), fields)
+    #     # # EXTRACT contracts
+    #     # if data.get('platforms'):
+    #     #     for _c in data['platforms']:
+    #     #         contract = dict()
+    #     #         _p = self.parser_contract(data=data, contract=_c)
+    #     #         for fields in self.parser_contract.FIELDS_CONTRACT:
+    #     #             contract[fields[1]] = getattr(_p, fields[0])
+    #     #         if _p.valid_contract:
+    #     #             contracts.append(contract)
+    #     #     item['contracts'] = contracts
+    #     # yield item
+    #
+
+    # If it doesn't start              ||
+    # Try change return or add await   \/
+
+    async def get_package(self, response):
+        package = response.meta['package']
+        package['image'] = base64.b64encode(response.body).decode('utf-8')
+        yield package
+
+    @classmethod
+    async def find_data(cls, response: Response) -> tuple[dict | tuple[tuple[str, dict]] | None, str | None]:
+        try:
+            data = json.loads(response.text)['data']
+            if data.get('popularTitles'):
+                result = data['popularTitles']
+                if result['edges']:
+                    for i in result['edges']:
+                        if i['node']['content']['externalIds']['imdbId'] == response.meta['item']['id']:
+                            return i['node'], "imdb_id"
+                    for i in result['edges']:
+                        if all((
+                                i['node']['content']['title'] == response.meta['item']['titleName'],
+                                i['node']['content']['originalReleaseYear'] == response.meta['item']['year']
+                        )):
+                            return i['node'], "date"
+            else:
+                return tuple(data.items()), "node"
+        except TypeError:
+            pass
+        return None, None
+
+    @staticmethod
+    async def create_query(countries: list[dict[str, str]]) -> str:
+        args = ','.join([f"$country_{i}: Country!, $language_{i}: Language!" for i in range(len(countries))])
+        query = '\n'.join([f'''_{i}:node(id: $nodeId) {{
+            ...SuggestedTitle_{i}
+        }}''' for i in range(len(countries))])
+        fragments = '\n'.join([f'''
+            fragment SuggestedOffer_{i} on Offer {{
+                monetizationType
+                presentationType
+                currency
+                retailPrice(language: $language_{i})
+                package {{
+                    id
+                }}
+                standardWebURL
+             }}
+            fragment SuggestedTitle_{i} on MovieOrShow {{
+                id
+                offers(country: $country_{i}, platform: WEB) {{
+                    ...SuggestedOffer_{i}
+                    }}
+            }}''' for i in range(len(countries))])
+        return f'''
+            query GetSuggestedTitles({args}, $nodeId: ID!) {{
+                {query}
+            }}
+            {fragments}
+        '''
+
+    @staticmethod
+    async def get_variables(countries: list[dict[str, str]], justwatch_id: str):
+        variables = dict()
+        for i, v in enumerate(countries):
+            variables |= {f"country_{i}": v['country'], f"language_{i}": v['language']}
+        variables['nodeId'] = justwatch_id
+        return variables
 
 
-        for item in data:
-            # item |= {'__csv__': {
-            #     'filename': '/Users/ostapenkokostya/work/movies/app/test.csv',
-            #     'filename': './test.csv',
-            # }}
-            yield Request(
-                url=f"https://api.coinmarketcap.com/data-api/v3/cryptocurrency/detail?id={item['id']}",
-                headers=self.headers,
-                callback=self.get_item,
-                meta={'meta': item}
-            )
-
-    # From demoCMC.py (test ver w/CMC
-    async def get_item(self, response: Response):
-        item = dict()
-        item |= {'__csv__': {
-            # 'filename': '/Users/ostapenkokostya/work/movies/app/test.csv',
-            'filename': './test.csv',
-        }}
-        yield item
-        # contracts = list()
-        # # EXTRACT new cryptocurrency
-        # data = json.loads(response.text)['data']
-        # for fields in self.parser.FIELDS:
-        #     item[fields] = getattr(self.parser(data=data), fields)
-        # # EXTRACT contracts
-        # if data.get('platforms'):
-        #     for _c in data['platforms']:
-        #         contract = dict()
-        #         _p = self.parser_contract(data=data, contract=_c)
-        #         for fields in self.parser_contract.FIELDS_CONTRACT:
-        #             contract[fields[1]] = getattr(_p, fields[0])
-        #         if _p.valid_contract:
-        #             contracts.append(contract)
-        #     item['contracts'] = contracts
-        # yield item
-
-    def get_packages_request(self, response):
-        pass
+# For Test
+if __name__ == "__main__":
+    JustwatchSpider.start()

@@ -3,12 +3,14 @@ from datetime import datetime
 from aioscrapy.http import Response
 from aioscrapy import Spider, Request
 
+# Doesn't stop
+
 
 class JustwatchSpider(Spider):
     name = 'cmc1'
     custom_settings = dict(
-        USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 "
-                   "Safari/537.36",
+        USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
         DOWNLOAD_DELAY=0.5,
         RANDOMIZE_DOWNLOAD_DELAY=True,
         CONCURRENT_REQUESTS=12,
@@ -67,19 +69,8 @@ class JustwatchSpider(Spider):
             'filename': './test.csv',
         }}
         yield item
-        # contracts = list()
-        # # EXTRACT new cryptocurrency
-        # data = json.loads(response.text)['data']
-        # for fields in self.parser.FIELDS:
-        #     item[fields] = getattr(self.parser(data=data), fields)
-        # # EXTRACT contracts
-        # if data.get('platforms'):
-        #     for _c in data['platforms']:
-        #         contract = dict()
-        #         _p = self.parser_contract(data=data, contract=_c)
-        #         for fields in self.parser_contract.FIELDS_CONTRACT:
-        #             contract[fields[1]] = getattr(_p, fields[0])
-        #         if _p.valid_contract:
-        #             contracts.append(contract)
-        #     item['contracts'] = contracts
-        # yield item
+
+
+# For test
+if __name__ == "__main__":
+    JustwatchSpider.start()
