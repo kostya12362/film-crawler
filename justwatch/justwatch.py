@@ -10,13 +10,15 @@ import pymongo
 import logging
 import json
 import base64
-# from pprint import pprint
 
-from justwatch.resources.justwatch_graphql import (
+from resources.graphql import (
     QUERY_GET_ALL_PACKAGES,
     QUERY_SEARCH_PAGES,
 )
-from justwatch.parser.justwatch.justwatch_parser_v3 import ParserJustwatch
+from resources.сonstants import (
+    test`
+)
+# from justwatch.parser.justwatch.justwatch_parser_v3 import ParserJustwatch
 
 logger = logging.getLogger(__name__)
 settings = get_project_settings()
@@ -141,8 +143,10 @@ class JustwatchSpider(Spider):
         response.meta['localization'] = localization
         yield self.get_packages_request(response)
 
-    async def get_packages(self, response):
-        packages = dict() if response.meta.get('packages') is None else response.meta['packages']
+    # async def get_packages(self, response):
+        # packages = dict() if response.meta.get('packages') is None else response.meta['packages']
+
+        packages = dict()
         data = json.loads(response.text)['data']['packages']
         for package in data:
             packages |= {
@@ -181,7 +185,7 @@ class JustwatchSpider(Spider):
                     method='POST',
                     body=json.dumps({
                         "query": QUERY_SEARCH_PAGES,
-                        "variables": {
+                        "variables": {  # constants
                             "country": "US",
                             "language": "en",
                             "first": 50,
@@ -212,7 +216,7 @@ class JustwatchSpider(Spider):
             method='POST',
             body=json.dumps({
                 "query": QUERY_GET_ALL_PACKAGES,
-                "variables": {
+                "variables": {  # constants
                     "iconFormat": "WEBP",
                     "iconProfile": "S100",
                     "platform": "WEB",
@@ -234,7 +238,7 @@ class JustwatchSpider(Spider):
         async def get_item_in_usa(self, response):
             data = self.find_data(response)
             if isinstance(data[0], dict):
-                variables = json.loads(response.request.body.decode('utf-8'))['variables']
+                variables = json.loads(response.request.body.decode('utf-8'))['variables'] # constants
                 data = ParserJustwatch(
                     data=data[0],
                     by_fild=data[1],
@@ -271,7 +275,7 @@ class JustwatchSpider(Spider):
                     method='POST',
                     body=json.dumps({
                         "query": self.create_query(countries),
-                        "variables": self.get_variables(countries, response.meta['justwatch_id'])
+                        "variables": self.get_variables(countries, response.meta['justwatch_id'])   # constants
                     }),
                     headers=self.headers,
                     callback=self.get_other_localization,
@@ -287,7 +291,7 @@ class JustwatchSpider(Spider):
             data = self.find_data(response)
 
             if isinstance(data[0], tuple):
-                variables = json.loads(response.request.body.decode('utf-8'))['variables']
+                variables = json.loads(response.request.body.decode('utf-8'))['variables']  # constants
                 for i in data[0]:
                     item = ParserJustwatch(data=i[1], by_fild=data[1], country=variables[f'country{i[0]}'],
                                            language=variables[f'language{i[0]}'], response=response)
@@ -339,7 +343,8 @@ class JustwatchSpider(Spider):
     # If it doesn't start              ||
     # Try change return or add await   \/
 
-    async def get_package(self, response):
+    @staticmethod
+    def get_package(response):
         package = response.meta['package']
         package['image'] = base64.b64encode(response.body).decode('utf-8')
         yield package
@@ -397,8 +402,8 @@ class JustwatchSpider(Spider):
         '''
 
     @staticmethod
-    async def get_variables(countries: list[dict[str, str]], justwatch_id: str):
-        variables = dict()
+    def get_variables(countries: list[dict[str, str]], justwatch_id: str):
+        variables = dict()  # constants?
         for i, v in enumerate(countries):
             variables |= {f"country_{i}": v['country'], f"language_{i}": v['language']}
         variables['nodeId'] = justwatch_id
