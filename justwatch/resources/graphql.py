@@ -174,6 +174,36 @@ class QueryControl:
         return QueryControl._interpolate_parameters(query_movie_by_id, country=country,
                                                     language=language, nodeId=node_id)
 
+    @staticmethod
+    def create_query(countries: list[dict[str, str]]) -> str:
+        args = ','.join([f"$country_{i}: Country!, $language_{i}: Language!" for i in range(len(countries))])
+        query = '\n'.join([f'''_{i}:node(id: $nodeId) {{
+                    ...SuggestedTitle_{i} 
+                }}''' for i in range(len(countries))])
+        fragments = '\n'.join([f'''
+                    fragment SuggestedOffer_{i} on Offer {{
+                        monetizationType
+                        presentationType
+                        currency
+                        retailPrice(language: $language_{i})
+                        package {{
+                            id
+                        }}
+                        standardWebURL
+                     }}
+                    fragment SuggestedTitle_{i} on MovieOrShow {{
+                        id
+                        offers(country: $country_{i}, platform: WEB) {{
+                            ...SuggestedOffer_{i}
+                            }}
+                    }}''' for i in range(len(countries))])
+        return f'''
+                    query GetSuggestedTitles({args}, $nodeId: ID!) {{
+                        {query}
+                    }}
+                    {fragments}
+                '''
+
     # VARIABLES_GET_ALL_PACKAGES = {
     #     "iconFormat": "WEBP",
     #     "iconProfile": "S100",

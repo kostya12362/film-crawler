@@ -13,7 +13,7 @@ import base64
 
 from resources.graphql import QueryControl
 
-from resources.сonstants import Variables
+# from resources.constants import Variables
 
 # from justwatch.parser.justwatch.justwatch_parser_v3 import ParserJustwatch
 
@@ -126,6 +126,7 @@ class JustwatchSpider(Spider):
         )
 
     def parse(self, response: Response, **kwargs):
+        self.get_item_in_usa
         localization = [i['full_locale'] for i in json.loads(response.text)]
         response.meta['localization'] = localization
         yield self.get_packages_request(response)
@@ -261,7 +262,7 @@ class JustwatchSpider(Spider):
                     url=self.base_url,
                     method='POST',
                     body=json.dumps({
-                        "query": self.create_query(countries),
+                        "query": QueryControl.create_query(countries),
                         "variables": self.get_variables(countries, response.meta['justwatch_id'])  # constants
                     }),
                     headers=self.headers,
@@ -321,37 +322,37 @@ class JustwatchSpider(Spider):
             pass
         return None, None
 
-    # TODO: move to graphql.py (def)
+    # xTODO: move to graphql.py (def)
 
-    @staticmethod
-    def create_query(countries: list[dict[str, str]]) -> str:
-        args = ','.join([f"$country_{i}: Country!, $language_{i}: Language!" for i in range(len(countries))])
-        query = '\n'.join([f'''_{i}:node(id: $nodeId) {{
-            ...SuggestedTitle_{i}   # ?I need to change something there? 
-        }}''' for i in range(len(countries))])
-        fragments = '\n'.join([f'''
-            fragment SuggestedOffer_{i} on Offer {{
-                monetizationType
-                presentationType
-                currency
-                retailPrice(language: $language_{i})
-                package {{
-                    id
-                }}
-                standardWebURL
-             }}
-            fragment SuggestedTitle_{i} on MovieOrShow {{
-                id
-                offers(country: $country_{i}, platform: WEB) {{
-                    ...SuggestedOffer_{i}
-                    }}
-            }}''' for i in range(len(countries))])
-        return f'''
-            query GetSuggestedTitles({args}, $nodeId: ID!) {{   # ?I need to change something there? 
-                {query}
-            }}
-            {fragments}
-        '''
+    # @staticmethod
+    # def create_query(countries: list[dict[str, str]]) -> str:
+    #     args = ','.join([f"$country_{i}: Country!, $language_{i}: Language!" for i in range(len(countries))])
+    #     query = '\n'.join([f'''_{i}:node(id: $nodeId) {{
+    #             ...SuggestedTitle_{i}   # ?I need to change something there?
+    #         }}''' for i in range(len(countries))])
+    #     fragments = '\n'.join([f'''
+    #             fragment SuggestedOffer_{i} on Offer {{
+    #                 monetizationType
+    #                 presentationType
+    #                 currency
+    #                 retailPrice(language: $language_{i})
+    #                 package {{
+    #                     id
+    #                 }}
+    #                 standardWebURL
+    #              }}
+    #             fragment SuggestedTitle_{i} on MovieOrShow {{
+    #                 id
+    #                 offers(country: $country_{i}, platform: WEB) {{
+    #                     ...SuggestedOffer_{i}
+    #                     }}
+    #             }}''' for i in range(len(countries))])
+    #     return f'''
+    #             query GetSuggestedTitles({args}, $nodeId: ID!) {{   # ?I need to change something there?
+    #                 {query}
+    #             }}
+    #             {fragments}
+    #         '''
 
     @staticmethod
     def get_variables(countries: list[dict[str, str]], justwatch_id: str):
