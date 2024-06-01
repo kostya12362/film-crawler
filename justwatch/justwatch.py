@@ -11,13 +11,10 @@ import logging
 import json
 import base64
 
-from resources.graphql import (
-    QUERY_GET_ALL_PACKAGES,
-    QUERY_SEARCH_PAGES,
-)
-from resources.сonstants import (
-    test`
-)
+from resources.graphql import QueryControl
+
+from resources.сonstants import Variables
+
 # from justwatch.parser.justwatch.justwatch_parser_v3 import ParserJustwatch
 
 logger = logging.getLogger(__name__)
@@ -25,6 +22,7 @@ settings = get_project_settings()
 
 
 class JustwatchSpider(Spider):
+    # region SpiderSettings
     name = 'justwatch_v3'
 
     # Control url and domains
@@ -52,7 +50,7 @@ class JustwatchSpider(Spider):
             'aioscrapy.libs.pipelines.csv.CsvPipeline': 100,
             # ! If not working well, try to add justwatch pipelines from imdb_project
         },
-        CLOSE_SPIDER_ON_IDLE=True,  # ? Which means (Google)
+        CLOSE_SPIDER_ON_IDLE=True,
         DOWNLOAD_HANDLERS_TYPE="httpx",
         HTTPX_CLIENT_SESSION_ARGS={'http2': True, 'follow_redirects': True, 'timeout': 10},
         HTTPERROR_ALLOW_ALL=True,
@@ -69,15 +67,9 @@ class JustwatchSpider(Spider):
         'origin': 'https://www.justwatch.com',
     }
 
-    #  !
-    # start_urls = [
-    #     # 'https://api.coinmarketcap.com/data-api/v3/cryptocurrency/listing?start=1&limit=10000&'
-    #     # 'sortBy=market_cap&sortType=desc&convert=USD&cryptoType=all&tagType=all&audited=false&'
-    #     # 'aux=ath,atl,high24h,low24h,num_market_pairs,cmc_rank,date_added,'
-    #     # 'max_supply,circulating_supply,total_supply,volume_7d,volume_30d,volume_60d,tags'
-    #  ]
-
     handle_httpstatus_list = [400, 415, 422, 429, 502]
+
+    # endregion
 
     def __init__(self, *args, **kwargs):
         super(JustwatchSpider, self).__init__(*args, **kwargs)
@@ -115,6 +107,7 @@ class JustwatchSpider(Spider):
                 "$limit": limit
             }
         ])
+
         # self.imdb = []
         # with open('/Users/ostapenkokostya/work/upwork/imdb/xx.json', 'r') as file:
         #     self.imdb = [{
@@ -132,20 +125,10 @@ class JustwatchSpider(Spider):
             method='GET',
         )
 
-    # async def parse(self, response: Response):
-    #     print(response.url)
-    #     data = response.json()['data']['cryptoCurrencyList']
-    #     result = [i['id'] for i in data]
-    #     print(datetime.now().isoformat(), len(result))
-
-    async def parse(self, response: Response, **kwargs):
+    def parse(self, response: Response, **kwargs):
         localization = [i['full_locale'] for i in json.loads(response.text)]
         response.meta['localization'] = localization
         yield self.get_packages_request(response)
-
-    # async def get_packages(self, response):
-        # packages = dict() if response.meta.get('packages') is None else response.meta['packages']
-
         packages = dict()
         data = json.loads(response.text)['data']['packages']
         for package in data:
@@ -184,7 +167,8 @@ class JustwatchSpider(Spider):
                     url=self.base_url,
                     method='POST',
                     body=json.dumps({
-                        "query": QUERY_SEARCH_PAGES,
+                        # "query": QUERY_SEARCH_PAGES,
+                        "query": QueryControl.query_search_pages(),
                         "variables": {  # constants
                             "country": "US",
                             "language": "en",
@@ -195,7 +179,7 @@ class JustwatchSpider(Spider):
                         }
                     }),
                     headers=self.headers,
-                    callback=self.get_item_in_usa,
+                    callback=self.get_item_in_usa,  # Everything okay in here? or do I need create this method?
                     cookies={},
                     meta={
                         "localization": response.meta['localization'],
@@ -205,17 +189,18 @@ class JustwatchSpider(Spider):
                     dont_filter=True,
                 )
 
-    async def get_packages_request(self, response: Response, packages: dict = None):
+    def get_packages_request(self, response: Response, packages: dict = None):
         localization = response.meta['localization']
         if response.meta.get('_localization') is not None:
             _localization = response.meta['_localization']
         else:
             _localization = localization
-        yield aioscrapy.Request(  # Maybe need to use await
+        yield aioscrapy.Request(
             url=self.base_url,
             method='POST',
             body=json.dumps({
-                "query": QUERY_GET_ALL_PACKAGES,
+                # "query": QUERY_GET_ALL_PACKAGES,
+                "query": QueryControl.query_all_packages(),
                 "variables": {  # constants
                     "iconFormat": "WEBP",
                     "iconProfile": "S100",
@@ -225,7 +210,7 @@ class JustwatchSpider(Spider):
                 }
             }),
             headers=self.headers,
-            callback=self.get_packages,
+            callback=self.get_packages,  # Everything okay in here? or do I need create this method?
             meta={
                 'localization': localization,
                 "_localization": _localization[1:],
@@ -235,10 +220,12 @@ class JustwatchSpider(Spider):
             dont_filter=True,
         )
 
+        # TODO: rewrite ParserJustwatch
+
         async def get_item_in_usa(self, response):
             data = self.find_data(response)
             if isinstance(data[0], dict):
-                variables = json.loads(response.request.body.decode('utf-8'))['variables'] # constants
+                variables = json.loads(response.request.body.decode('utf-8'))['variables']  # constants
                 data = ParserJustwatch(
                     data=data[0],
                     by_fild=data[1],
@@ -259,11 +246,11 @@ class JustwatchSpider(Spider):
                             'item': response.meta['item'],
                         }
                     )
-                yield item
-                # else:
-                #   logger.info(f"Not found item in get_item_in_usa {response.meta['item']['id']}")
+                    yield item
+                else:
+                    logger.info(f"Not found item in get_item_in_usa {response.meta['item']['id']}")
 
-        async def get_all_localization(self, response):
+        def get_all_localization(self, response):
             data = json.loads(response.text)['href_lang_tags']
             countries = [{
                 "country": i['locale'].split('_')[1],
@@ -275,7 +262,7 @@ class JustwatchSpider(Spider):
                     method='POST',
                     body=json.dumps({
                         "query": self.create_query(countries),
-                        "variables": self.get_variables(countries, response.meta['justwatch_id'])   # constants
+                        "variables": self.get_variables(countries, response.meta['justwatch_id'])  # constants
                     }),
                     headers=self.headers,
                     callback=self.get_other_localization,
@@ -287,7 +274,7 @@ class JustwatchSpider(Spider):
                     dont_filter=True,
                 )
 
-        async def get_other_localization(self, response):
+        def get_other_localization(self, response):
             data = self.find_data(response)
 
             if isinstance(data[0], tuple):
@@ -300,48 +287,11 @@ class JustwatchSpider(Spider):
             else:
                 logging.error("Error in get_other_localization")
 
-        #
         # for item in data:
         #     # item |= {'__csv__': {
         #     #     'filename': '/Users/ostapenkokostya/work/movies/app/test.csv',
         #     #     'filename': './test.csv',
         #     # }}
-        #     yield Request(
-        #         url=f"https://api.coinmarketcap.com/data-api/v3/cryptocurrency/detail?id={item['id']}",
-        #         headers=self.headers,
-        #         callback=self.get_item,
-        #         meta={'meta': item}
-        #     )
-        #
-
-    # From demoCMC.py (test ver w/CMC)
-    # async def get_item(self, response: Response):
-    #     item = dict()
-    #     item |= {'__csv__': {
-    #         # 'filename': '/Users/ostapenkokostya/work/movies/app/test.csv',
-    #         'filename': './test.csv',
-    #     }}
-    #     yield item
-    #     # contracts = list()
-    #     # # EXTRACT new cryptocurrency
-    #     # data = json.loads(response.text)['data']
-    #     # for fields in self.parser.FIELDS:
-    #     #     item[fields] = getattr(self.parser(data=data), fields)
-    #     # # EXTRACT contracts
-    #     # if data.get('platforms'):
-    #     #     for _c in data['platforms']:
-    #     #         contract = dict()
-    #     #         _p = self.parser_contract(data=data, contract=_c)
-    #     #         for fields in self.parser_contract.FIELDS_CONTRACT:
-    #     #             contract[fields[1]] = getattr(_p, fields[0])
-    #     #         if _p.valid_contract:
-    #     #             contracts.append(contract)
-    #     #     item['contracts'] = contracts
-    #     # yield item
-    #
-
-    # If it doesn't start              ||
-    # Try change return or add await   \/
 
     @staticmethod
     def get_package(response):
@@ -350,7 +300,7 @@ class JustwatchSpider(Spider):
         yield package
 
     @classmethod
-    async def find_data(cls, response: Response) -> tuple[dict | tuple[tuple[str, dict]] | None, str | None]:
+    def find_data(cls, response: Response) -> tuple[dict | tuple[tuple[str, dict]] | None, str | None]:
         try:
             data = json.loads(response.text)['data']
             if data.get('popularTitles'):
@@ -371,11 +321,13 @@ class JustwatchSpider(Spider):
             pass
         return None, None
 
+    # TODO: move to graphql.py (def)
+
     @staticmethod
-    async def create_query(countries: list[dict[str, str]]) -> str:
+    def create_query(countries: list[dict[str, str]]) -> str:
         args = ','.join([f"$country_{i}: Country!, $language_{i}: Language!" for i in range(len(countries))])
         query = '\n'.join([f'''_{i}:node(id: $nodeId) {{
-            ...SuggestedTitle_{i}
+            ...SuggestedTitle_{i}   # ?I need to change something there? 
         }}''' for i in range(len(countries))])
         fragments = '\n'.join([f'''
             fragment SuggestedOffer_{i} on Offer {{
@@ -395,7 +347,7 @@ class JustwatchSpider(Spider):
                     }}
             }}''' for i in range(len(countries))])
         return f'''
-            query GetSuggestedTitles({args}, $nodeId: ID!) {{
+            query GetSuggestedTitles({args}, $nodeId: ID!) {{   # ?I need to change something there? 
                 {query}
             }}
             {fragments}
