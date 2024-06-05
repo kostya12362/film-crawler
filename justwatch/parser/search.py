@@ -1,5 +1,6 @@
 import json
-from .base import BaseParserModel
+
+from base import BaseParserModel
 
 
 class Item(BaseParserModel):

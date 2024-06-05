@@ -1,19 +1,16 @@
-import asyncio
-from datetime import datetime
-
-import aioscrapy
-from aioscrapy.http import Response
-from aioscrapy import Spider, Request
-
-from aioscrapy.utils.project import get_project_settings
-# import pymongo
-import logging
 import json
 import base64
+import logging
+from datetime import datetime
 
-# TODO: PEP-8
+import asyncio
+
+import aioscrapy
+from aioscrapy import Spider, Request
+from aioscrapy.http import Response
+from aioscrapy.utils.project import get_project_settings
+
 from resources.graphql import QueryControl
-
 from parser.justwatch.justwatch_parser_v2 import ParserJustwatch
 
 logger = logging.getLogger(__name__)
@@ -21,9 +18,8 @@ settings = get_project_settings()
 
 
 class JustwatchSpider(Spider):
-    # region SpiderSettings
     name = 'justwatch_v3'
-    graphql = QueryControl
+    graphql = QueryControl()
 
     # Control url and domains
     allow_domains = ['apis.justwatch.com']
@@ -33,12 +29,12 @@ class JustwatchSpider(Spider):
     custom_settings = dict(
         USER_AGENT="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36",
-        DOWNLOAD_DELAY=0.2,  # Some settings have changed
+        DOWNLOAD_DELAY=0.2,
         RANDOMIZE_DOWNLOAD_DELAY=True,
         CONCURRENT_REQUESTS=20,
 
-        CONCURRENT_REQUESTS_PER_DOMAIN=40,  # Danger (test)
-        SCHEDULER_FLUSH_ON_START=True,  # Test feature from aioscrapy example
+        CONCURRENT_REQUESTS_PER_DOMAIN=40,
+        SCHEDULER_FLUSH_ON_START=True,
         RETRY_HTTP_CODES=[429, 408, 504],
 
         LOG_LEVEL='INFO',
@@ -48,7 +44,6 @@ class JustwatchSpider(Spider):
         },
         ITEM_PIPELINES={
             'aioscrapy.libs.pipelines.csv.CsvPipeline': 100,
-            # ! If not working well, try to add justwatch pipelines from imdb_project
         },
         CLOSE_SPIDER_ON_IDLE=True,
         DOWNLOAD_HANDLERS_TYPE="httpx",
@@ -69,45 +64,11 @@ class JustwatchSpider(Spider):
 
     handle_httpstatus_list = [400, 415, 422, 429, 502]
 
-    # endregion
-
     def __init__(self, *args, **kwargs):
         super(JustwatchSpider, self).__init__(*args, **kwargs)
         skip = int(kwargs.get('skip', 0))
         limit = int(kwargs.get('limit', 1))
         logger.info(f'skip = {skip} limit = {limit}--------------------------------')
-        # self.db = pymongo.MongoClient(settings['MONGO_URI'])[settings.get('MONGO_DATABASE', 'movies')]
-        # self.imdb = self.db['imdb'].aggregate([
-        #     {
-        #         "$match": {
-        #             "title.title": {"$ne": None},
-        #             "title.ratings_summary_aggregate": {"$gt": 5.0},
-        #             "title.ratings_summary_vote_count": {"$gt": 400},
-        #             "title.release_date": {"$gt": datetime(year=1980, month=1, day=1)}
-        #         },
-        #     },
-        #     {
-        #         "$project": {
-        #             "id": 1,
-        #             "titleName": "$title.title",
-        #             "year": {
-        #                 "$year": {
-        #                     "$toDate": "$title.release_date"
-        #                 }
-        #             }
-        #         }
-        #     },
-        #     {
-        #         "$sort": {"id": 1}
-        #     },
-        #     {
-        #         "$skip": skip
-        #     },
-        #     {
-        #         "$limit": limit
-        #     }
-        # ])
-
         # Work with json
         self.imdb = []
         with open('Result_2.json', 'r') as file:
@@ -129,7 +90,7 @@ class JustwatchSpider(Spider):
     def parse(self, response: Response, **kwargs):
         localizations = [i['full_locale'] for i in json.loads(response.text)]
         print(localizations)
-        # localizations -> country
+        #  Converting localizations to country
         for i in localizations[0:1]:
             # i = en_US, uk_UK, ru_RU, en_GB
             yield aioscrapy.Request(
@@ -141,40 +102,20 @@ class JustwatchSpider(Spider):
                 cookies={},
                 dont_filter=True,
             )
-
         # Search by imdb film title
         for i in self.imdb:
             # i = title
             yield aioscrapy.Request(
                 url=self.base_url,
                 method='POST',
-                body=self.graphql.get_search_film(i),
-                # old
-                # body=json.dumps({
-                #     "query": QueryControl.query_search_pages(
-                #         country="US",
-                #         language="en",
-                #         first=50,
-                #         filter_param={
-                #             "searchQuery": i['titleName']
-                #         }
-                #     ),
-                #     # "variables": Variables.get_variables_parse(),
-                #     "variables": {  # constants
-                #         "country": "US",
-                #         "language": "en",
-                #         "first": 50,
-                #         "filter_param": {
-                #             "searchQuery": i['titleName']
-                #         }
-                #     }
-                # }),
+                body=self.graphql.search_film(i),
                 headers=self.headers,
                 callback=self.get_item_in_usa,
                 cookies={},
                 dont_filter=True,
             )
 
+    # Getting all packages
     async def get_packages(self, response: Response):
         data = json.loads(response.text)['data']['packages']
         packages = dict()
@@ -196,23 +137,21 @@ class JustwatchSpider(Spider):
                         'iconUrl': addon['icon'],
                     }
                 }
-        # Print all packages
+        # Print all received packages
         for i in packages.items():
             print(i)
-
         # Download icons
-        # for package_id, package in packages.items():
-        #     _id = package['iconUrl'].split('/')[2]
-        #     package['id'] = package_id
-        #     package['iconUrl'] = f'https://www.justwatch.com/images/icon/{_id}/s100/icon.webp'
-        #     yield aioscrapy.Request(
-        #         url=package['iconUrl'],
-        #         callback=self.get_package_image,
-        #         meta={'package': package},
-        #         dont_filter=True
-        #     )
+        for package_id, package in packages.items():
+            _id = package['iconUrl'].split('/')[2]
+            package['id'] = package_id
+            package['iconUrl'] = f'https://www.justwatch.com/images/icon/{_id}/s100/icon.webp'
+            yield aioscrapy.Request(
+                url=package['iconUrl'],
+                callback=self.get_package_image,
+                meta={'package': package},
+                dont_filter=True
+            )
 
-    # TODO: rewrite ParserJustwatch
     # Search by en_US
     async def get_item_in_usa(self, response):
         data = self.find_data(response)
@@ -232,16 +171,17 @@ class JustwatchSpider(Spider):
                     url=f"https://apis.justwatch.com/content/urls?path={data.get_full_path}",
                     headers=self.headers,
                     callback=self.get_all_localization,
-                    # meta={
-                    #     'packages': response.meta['packages'],
-                    #     'justwatch_id': item['justwatch_id'],
-                    #     'item': response.meta['item'],
-                    # }
+                    meta={
+                        'packages': response.meta['packages'],
+                        'justwatch_id': item['justwatch_id'],
+                        'item': response.meta['item'],
+                    }
                 )
                 yield item
             else:
                 logger.info(f"Not found item in get_item_in_usa {response.meta['item']['id']}")
 
+    # Getting all localizations for the film
     def get_all_localization(self, response):
         data = json.loads(response.text)['href_lang_tags']
         countries = [{
@@ -249,15 +189,11 @@ class JustwatchSpider(Spider):
             "language": i['locale'].split('_')[0]
         } for i in data if i['locale'] != 'en_US']
         if len(countries) > 0:
+            justwatch_id = response.meta['justwatch_id']
             yield aioscrapy.Request(
                 url=self.base_url,
                 method='POST',
-                # body=self.graphql.get_all_films(countries),
-                # Move to graphql.py // Try again
-                body=json.dumps({  # graphql
-                    "query": self.graphql.create_query(countries),
-                    "variables": self.get_variables
-                }),
+                body=self.graphql.get_all_localizations(countries, justwatch_id),
                 headers=self.headers,
                 callback=self.get_other_localization,
                 cookies={},
@@ -275,13 +211,6 @@ class JustwatchSpider(Spider):
                 yield item.get_data
         else:
             logging.error("Error in get_other_localization")
-
-    # item |= {'__csv__': {
-    # for item in data:
-    # #     # 'filename': '/Users/ostapenkokostya/work/movies/app/test.csv',
-    #     'filename': './test.csv',
-    # #
-    #     }}
 
     @staticmethod
     async def get_package_image(response: Response):
@@ -311,16 +240,6 @@ class JustwatchSpider(Spider):
         except TypeError:
             pass
         return None, None
-
-    # Maybe move to graphql.py?
-    # TODO: move to graphql.py
-    @staticmethod
-    def get_variables(countries: list[dict[str, str]], justwatch_id: str):
-        variables = dict()
-        for i, v in enumerate(countries):
-            variables |= {f"country_{i}": v['country'], f"language_{i}": v['language']}
-        variables['nodeId'] = justwatch_id
-        return variables
 
 
 # For Test

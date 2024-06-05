@@ -1,7 +1,9 @@
 import os
 import warnings
+
 import aioscrapy.exceptions
-warnings.filterwarnings("ignore", category=aioscrapy.exceptions.ScrapyDeprecationWarning)
+
+warnings.filterwarnings("ignore", category=aioscrapy.exceptions.AioScrapyDeprecationWarning)
 
 BOT_NAME = 'justwatch'
 
@@ -32,7 +34,6 @@ SCRAPYD_PASSWORD = os.getenv('SCRAPYD_PASSWORD')
 SCRAPY_PROXY_USERNAME = os.getenv('SCRAPY_PROXY_USERNAME')
 SCRAPY_PROXY_PASSWORD = os.getenv('SCRAPY_PROXY_PASSWORD')
 SCRAPY_PROXY_PORT = os.getenv('SCRAPY_PROXY_PORT')
-
 
 REDIS_DB = os.getenv('REDIS_DB', 1)
 REDIS_HOST = os.getenv('REDIS_HOST')
