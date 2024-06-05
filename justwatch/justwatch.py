@@ -20,6 +20,7 @@ settings = get_project_settings()
 class JustwatchSpider(Spider):
     name = 'justwatch_v3'
     graphql = QueryControl()
+    FindBy = FindBy
 
     # Control url and domains
     allow_domains = ['apis.justwatch.com']
@@ -137,9 +138,6 @@ class JustwatchSpider(Spider):
                         'iconUrl': addon['icon'],
                     }
                 }
-        # Print all received packages
-        for i in packages.items():
-            print(i)
         # Download icons
         for package_id, package in packages.items():
             _id = package['iconUrl'].split('/')[2]
@@ -154,7 +152,7 @@ class JustwatchSpider(Spider):
 
     # Search by en_US
     async def get_item_in_usa(self, response):
-        data = self.find_data(response)
+        data = FindBy.find_data(response)
         if isinstance(data[0], dict):
             variables = json.loads(response.request.body.decode('utf-8'))['variables']
             data = ParserJustwatch(
@@ -200,14 +198,14 @@ class JustwatchSpider(Spider):
                 dont_filter=True,
             )
 
-    def get_other_localization(self, response):
-        data = self.find_data(response)
+    @staticmethod
+    def get_other_localization(response):
+        data = FindBy.find_data(response)
         if isinstance(data[0], tuple):
             variables = json.loads(response.request.body.decode('utf-8'))['variables']
             for i in data[0]:
                 item = ParserJustwatch(data=i[1], by_fild=data[1], country=variables[f'country{i[0]}'],
                                        language=variables[f'language{i[0]}'], response=response)
-
                 yield item.get_data
         else:
             logging.error("Error in get_other_localization")
@@ -219,6 +217,8 @@ class JustwatchSpider(Spider):
         print(package)
         yield package
 
+
+class FindBy:
     @classmethod
     def find_data(cls, response: Response) -> tuple[dict | tuple[tuple[str, dict]] | None, str | None]:
         try:
@@ -240,6 +240,51 @@ class JustwatchSpider(Spider):
         except TypeError:
             pass
         return None, None
+
+    @classmethod
+    def find_by_title(cls, response: Response, title: str):
+        try:
+            data = json.loads(response.text)['data']
+            if 'popularTitles' in data:
+                result = data['popularTitles']
+                if 'edges' in result:
+                    for i in result['edges']:
+                        if i['node']['content'].get('title') == title:
+                            return i['node'], "title"
+            return None, "Title not found"
+        except (TypeError, KeyError, json.JSONDecodeError) as e:
+            print(f"Exception occurred: {e}")
+        return None, "error"
+
+    @classmethod
+    def find_by_id(cls, response: Response, imdb_id):
+        try:
+            data = json.loads(response.text)['data']
+            if 'popularTitles' in data:
+                result = data['popularTitles']
+                if 'edges' in result:
+                    for i in result['edges']:
+                        if i['node']['content']['externalIds'].get('imdbId') == imdb_id:
+                            return i['node'], "imdb_id"
+            return None, "ID not found"
+        except (TypeError, KeyError, json.JSONDecodeError) as e:
+            print(f"Exception occurred: {e}")
+        return None, "error"
+
+    @classmethod
+    def find_by_year(cls, response: Response, year: int):
+        try:
+            data = json.loads(response.text)['data']
+            if 'popularTitles' in data:
+                result = data['popularTitles']
+                if 'edges' in result:
+                    for i in result['edges']:
+                        if i['node']['content'].get('originalReleaseYear') == year:
+                            return i['node'], "year"
+            return None, "Year not found"
+        except (TypeError, KeyError, json.JSONDecodeError) as e:
+            print(f"Exception occurred: {e}")
+        return None, "error"
 
 
 # For Test
