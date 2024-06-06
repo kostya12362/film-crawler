@@ -1,6 +1,6 @@
 import json
-
-from justwatch.resources.сonstants import QUERY_GET_ALL_PACKAGES, QUERY_SEARCH_PAGES, QUERY_GET_MOVIE_BY_ID
+# from justwatch.resources.сonstants import QUERY_GET_ALL_PACKAGES, QUERY_SEARCH_PAGES, QUERY_GET_MOVIE_BY_ID
+from .сonstants import *
 
 
 class QueryControl:

@@ -17,10 +17,60 @@ logger = logging.getLogger(__name__)
 settings = get_project_settings()
 
 
+class FindBy:
+    @staticmethod
+    def extract_edges(response: Response) -> list[dict[str, any]]:
+        try:
+            data = json.loads(response.text)['data']
+            if 'popularTitles' in data and 'edges' in data['popularTitles']:
+                return data['popularTitles']['edges']
+        except (TypeError, KeyError, json.JSONDecodeError) as e:
+            print(f"Error processing response: {e}")
+        return []
+
+    def find_data(self, response: Response) -> tuple[dict | tuple[tuple[str, dict]] | None, str | None]:
+        edges = self.extract_edges(response)
+        try:
+            for i in edges:
+                if i['node']['content']['externalIds']['imdbId'] == response.meta['item']['id']:
+                    return i['node'], "imdb_id"
+            for i in edges:
+                if all((
+                        i['node']['content']['title'] == response.meta['item']['titleName'],
+                        i['node']['content']['originalReleaseYear'] == response.meta['item']['year']
+                )):
+                    return i['node'], "date"
+            return tuple(json.loads(response.text)['data'].items()), "node"
+        except (TypeError, KeyError, json.JSONDecodeError) as e:
+            print(f"Error processing response: {e}")
+        return None, None
+
+    def find_by_title(self, response: Response, title: str):
+        edges = self.extract_edges(response)
+        for i in edges:
+            if i['node']['content']['title'] == title:
+                return i['node'], "title"
+        return None, None
+
+    def find_by_id(self, response: Response, imdb_id):
+        edges = self.extract_edges(response)
+        for i in edges:
+            if i['node']['content']['externalIds']['imdbId'] == imdb_id:
+                return i['node'], "imdb_id"
+        return None, None
+
+    def find_by_year(self, response: Response, year: int):
+        edges = self.extract_edges(response)
+        for i in edges:
+            if i['node']['content']['originalReleaseYear'] == year:
+                return i['node'], "year"
+        return None, None
+
+
 class JustwatchSpider(Spider):
     name = 'justwatch_v3'
     graphql = QueryControl()
-    FindBy = FindBy
+    find = FindBy()
 
     # Control url and domains
     allow_domains = ['apis.justwatch.com']
@@ -151,10 +201,10 @@ class JustwatchSpider(Spider):
             )
 
     # Search by en_US
-    async def get_item_in_usa(self, response):
-        data = FindBy.find_data(response)
+    async def get_item_in_usa(self, response: Response):
+        data = self.find.find_data(response)
         if isinstance(data[0], dict):
-            variables = json.loads(response.request.body.decode('utf-8'))['variables']
+            variables = json.loads(response.request.body)['variables']
             data = ParserJustwatch(
                 data=data[0],
                 by_fild=data[1],
@@ -198,11 +248,10 @@ class JustwatchSpider(Spider):
                 dont_filter=True,
             )
 
-    @staticmethod
-    def get_other_localization(response):
-        data = FindBy.find_data(response)
+    def get_other_localization(self, response: Response):
+        data = self.find.find_data(response)
         if isinstance(data[0], tuple):
-            variables = json.loads(response.request.body.decode('utf-8'))['variables']
+            variables = json.loads(response.request.body)['variables']
             for i in data[0]:
                 item = ParserJustwatch(data=i[1], by_fild=data[1], country=variables[f'country{i[0]}'],
                                        language=variables[f'language{i[0]}'], response=response)
@@ -210,81 +259,11 @@ class JustwatchSpider(Spider):
         else:
             logging.error("Error in get_other_localization")
 
-    @staticmethod
-    async def get_package_image(response: Response):
+    async def get_package_image(self, response: Response):
         package = response.meta['package']
         package['image'] = base64.b64encode(response.body).decode('utf-8')
         print(package)
         yield package
-
-
-class FindBy:
-    @classmethod
-    def find_data(cls, response: Response) -> tuple[dict | tuple[tuple[str, dict]] | None, str | None]:
-        try:
-            data = json.loads(response.text)['data']
-            if data.get('popularTitles'):
-                result = data['popularTitles']
-                if result['edges']:
-                    for i in result['edges']:
-                        if i['node']['content']['externalIds']['imdbId'] == response.meta['item']['id']:
-                            return i['node'], "imdb_id"
-                    for i in result['edges']:
-                        if all((
-                                i['node']['content']['title'] == response.meta['item']['titleName'],
-                                i['node']['content']['originalReleaseYear'] == response.meta['item']['year']
-                        )):
-                            return i['node'], "date"
-            else:
-                return tuple(data.items()), "node"
-        except TypeError:
-            pass
-        return None, None
-
-    @classmethod
-    def find_by_title(cls, response: Response, title: str):
-        try:
-            data = json.loads(response.text)['data']
-            if 'popularTitles' in data:
-                result = data['popularTitles']
-                if 'edges' in result:
-                    for i in result['edges']:
-                        if i['node']['content'].get('title') == title:
-                            return i['node'], "title"
-            return None, "Title not found"
-        except (TypeError, KeyError, json.JSONDecodeError) as e:
-            print(f"Exception occurred: {e}")
-        return None, "error"
-
-    @classmethod
-    def find_by_id(cls, response: Response, imdb_id):
-        try:
-            data = json.loads(response.text)['data']
-            if 'popularTitles' in data:
-                result = data['popularTitles']
-                if 'edges' in result:
-                    for i in result['edges']:
-                        if i['node']['content']['externalIds'].get('imdbId') == imdb_id:
-                            return i['node'], "imdb_id"
-            return None, "ID not found"
-        except (TypeError, KeyError, json.JSONDecodeError) as e:
-            print(f"Exception occurred: {e}")
-        return None, "error"
-
-    @classmethod
-    def find_by_year(cls, response: Response, year: int):
-        try:
-            data = json.loads(response.text)['data']
-            if 'popularTitles' in data:
-                result = data['popularTitles']
-                if 'edges' in result:
-                    for i in result['edges']:
-                        if i['node']['content'].get('originalReleaseYear') == year:
-                            return i['node'], "year"
-            return None, "Year not found"
-        except (TypeError, KeyError, json.JSONDecodeError) as e:
-            print(f"Exception occurred: {e}")
-        return None, "error"
 
 
 # For Test
